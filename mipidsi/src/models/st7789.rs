@@ -1,4 +1,3 @@
-use defmt::info;
 use display_interface::{DataFormat, WriteOnlyDataCommand, AsyncWriteOnlyDataCommand};
 use embedded_graphics_core::{pixelcolor::Rgb565, prelude::IntoStorage};
 use embedded_hal::{blocking::delay::DelayUs, digital::v2::OutputPin};
@@ -22,6 +21,9 @@ mod variants;
 ///
 /// Interfaces implemented by the [display-interface](https://crates.io/crates/display-interface) are supported.
 pub struct ST7789;
+/// ST7789 display in Rgb565 color mode.
+/// With framebuffer on the MCU. Data only get's sent to the display with a call to [crate::AsyncDisplay::flush].
+/// Interfaces implemented by the [display-interface](https://crates.io/crates/display-interface) are supported.
 pub struct ST7789Framebuffer<'framebuffer> {
     framebuffer: &'framebuffer mut [u16; 240 * 135],
 }

@@ -1,5 +1,4 @@
 use display_interface::{WriteOnlyDataCommand, AsyncWriteOnlyDataCommand};
-use embedded_graphics_core::pixelcolor::Rgb565;
 
 use crate::{Builder, ColorInversion, ModelOptions, Orientation, builder::AsyncBuilder};
 
@@ -43,6 +42,14 @@ impl<'framebuffer, DI> AsyncBuilder<DI, ST7789Framebuffer<'framebuffer>>
 where
     DI: AsyncWriteOnlyDataCommand,
 {
+    /// Creates a new display builder for a ST7789 display in Rgb565 color mode with a integrated framebuffer.
+    /// 
+    /// Currently this only works for a 240x135 display.
+    ///
+    /// # Arguments
+    ///
+    /// * `di` - a [display interface](WriteOnlyDataCommand) for communicating with the display
+    /// * `framebuffer` - the framebuffer to store the data. [embedded_graphics_core::draw_target::DrawTarget] operations only write to the framebuffer and a [crate::AsyncModel::flush] call is necessary to actually send the data.
     pub fn st7789_framebuffer(di: DI, framebuffer: &'framebuffer mut [u16; 240 * 135]) -> Self {
         Self::with_model(di, ST7789Framebuffer { framebuffer })
     }

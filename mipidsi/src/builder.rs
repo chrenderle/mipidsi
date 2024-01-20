@@ -148,6 +148,7 @@ where
     }
 }
 
+/// Builder for [AsyncDisplay] instances
 pub struct AsyncBuilder<DI, MODEL>
 where
     DI: AsyncWriteOnlyDataCommand,
@@ -167,6 +168,7 @@ where
     /// Constructs a new builder from given [WriteOnlyDataCommand], [Model]
     /// and [ModelOptions]. For use by [Model] helpers, not public
     ///
+    #[allow(dead_code)]
     pub(crate) fn new(di: DI, model: MODEL, options: ModelOptions) -> Self {
         Self { di, model, options }
     }

@@ -84,6 +84,7 @@ pub trait AsyncModel {
 
     /// Initializes the display for this model with MADCTL from [crate::Display]
     /// and returns the value of MADCTL set by init
+    #[allow(async_fn_in_trait)]
     async fn init<RST, DELAY, DI>(
         &mut self,
         dcs: &mut AsyncDcs<DI>,
@@ -97,6 +98,7 @@ pub trait AsyncModel {
         DI: AsyncWriteOnlyDataCommand;
 
     /// Resets the display using a reset pin.
+    #[allow(async_fn_in_trait)]
     async fn hard_reset<RST, DELAY>(
         &mut self,
         rst: &mut RST,
@@ -127,6 +129,8 @@ pub trait AsyncModel {
     /// helper constructors.
     fn default_options() -> ModelOptions;
     
+    /// Actually transfer the data written by [`AsyncModel::clear`] or [`AsyncModel::write_pixel`]
+    #[allow(async_fn_in_trait)]
     async fn flush<DI>(&mut self, dcs: &mut AsyncDcs<DI>) -> Result<(), Error>
     where
         DI: AsyncWriteOnlyDataCommand;

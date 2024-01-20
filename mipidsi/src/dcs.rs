@@ -49,6 +49,7 @@ pub struct Dcs<DI> {
     pub di: DI,
 }
 
+/// Same as [`Dcs`] but with async
 pub struct AsyncDcs<DI> {
     /// Display interface instance.
     pub di: DI,

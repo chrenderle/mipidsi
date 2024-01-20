@@ -1,4 +1,3 @@
-use defmt::info;
 use embedded_graphics_core::prelude::{DrawTarget, Point, RgbColor, Size};
 use embedded_graphics_core::primitives::Rectangle;
 use embedded_graphics_core::{prelude::OriginDimensions, Pixel};
@@ -156,7 +155,6 @@ where
             let sy = area.top_left.y as u16;
             let ex = bottom_right.x as u16;
             let ey = bottom_right.y as u16;
-            info!("fill_contiguous->set_pixels({},{},{},{})", sx, sy, ex, ey);
             self.set_pixels(sx, sy, ex, ey, &mut colors)
         } else {
             // nothing to draw
