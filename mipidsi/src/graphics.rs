@@ -1,12 +1,13 @@
+use defmt::info;
 use embedded_graphics_core::prelude::{DrawTarget, Point, RgbColor, Size};
 use embedded_graphics_core::primitives::Rectangle;
 use embedded_graphics_core::{prelude::OriginDimensions, Pixel};
 use embedded_hal::digital::v2::OutputPin;
 
 use crate::dcs::BitsPerPixel;
-use crate::models::Model;
-use crate::{Display, Error};
-use display_interface::WriteOnlyDataCommand;
+use crate::models::{Model, AsyncModel};
+use crate::{Display, Error, AsyncDisplay};
+use display_interface::{WriteOnlyDataCommand, AsyncWriteOnlyDataCommand};
 
 impl<DI, M, RST> DrawTarget for Display<DI, M, RST>
 where
@@ -112,6 +113,74 @@ where
         let ds = self.options.display_size();
         let (width, height) = (u32::from(ds.0), u32::from(ds.1));
         Size::new(width, height)
+    }
+}
+
+impl<DI, M, RST> DrawTarget for AsyncDisplay<DI, M, RST>
+where
+    DI: AsyncWriteOnlyDataCommand,
+    M: AsyncModel,
+    RST: OutputPin,
+{
+    type Error = Error;
+    type Color = M::ColorFormat;
+
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        for pixel in pixels {
+            let x = pixel.0.x as u16;
+            let y = pixel.0.y as u16;
+
+            self.set_pixel(x, y, pixel.1)?;
+        }
+
+        Ok(())
+    }
+
+    fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Self::Color>,
+    {
+        if let Some(bottom_right) = area.bottom_right() {
+            let mut count = 0u32;
+            let max = area.size.width * area.size.height;
+
+            let mut colors = colors.into_iter().take_while(|_| {
+                count += 1;
+                count <= max
+            });
+
+            let sx = area.top_left.x as u16;
+            let sy = area.top_left.y as u16;
+            let ex = bottom_right.x as u16;
+            let ey = bottom_right.y as u16;
+            info!("fill_contiguous->set_pixels({},{},{},{})", sx, sy, ex, ey);
+            self.set_pixels(sx, sy, ex, ey, &mut colors)
+        } else {
+            // nothing to draw
+            Ok(())
+        }
+    }
+
+    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+        self.model.clear(color)?;
+        
+        Ok(())
+    }
+}
+
+impl<DI, MODEL, RST> OriginDimensions for AsyncDisplay<DI, MODEL, RST>
+where
+    DI: AsyncWriteOnlyDataCommand,
+    MODEL: AsyncModel,
+    RST: OutputPin,
+{
+    fn size(&self) -> Size {
+        /*let ds = self.options.display_size();
+        let (width, height) = (u32::from(ds.0), u32::from(ds.1));*/
+        Size::new(240, 135)
     }
 }
 

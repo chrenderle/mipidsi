@@ -76,8 +76,8 @@
 //! ## Troubleshooting
 //! See [document](https://github.com/almindor/mipidsi/blob/master/docs/TROUBLESHOOTING.md)
 
-use dcs::Dcs;
-use display_interface::WriteOnlyDataCommand;
+use dcs::{Dcs, AsyncDcs};
+use display_interface::{WriteOnlyDataCommand, AsyncWriteOnlyDataCommand};
 
 pub mod error;
 use embedded_hal::blocking::delay::DelayUs;
@@ -89,11 +89,12 @@ pub use options::*;
 
 mod builder;
 pub use builder::Builder;
+pub use builder::AsyncBuilder;
 
 pub mod dcs;
 
 pub mod models;
-use models::Model;
+use models::{Model, AsyncModel};
 
 mod graphics;
 
@@ -299,6 +300,237 @@ where
     /// The user must ensure that the state of the controller isn't altered in a way that interferes with the normal
     /// operation of this crate.
     pub unsafe fn dcs(&mut self) -> &mut Dcs<DI> {
+        &mut self.dcs
+    }
+}
+
+
+///
+/// Display driver to connect to TFT displays.
+///
+pub struct AsyncDisplay<DI, MODEL, RST>
+where
+    DI: AsyncWriteOnlyDataCommand,
+    MODEL: AsyncModel,
+    RST: OutputPin,
+{
+    // DCS provider
+    dcs: AsyncDcs<DI>,
+    // Model
+    model: MODEL,
+    // Reset pin
+    rst: Option<RST>,
+    // Model Options, includes current orientation
+    options: ModelOptions,
+    // Current MADCTL value copy for runtime updates
+    madctl: dcs::SetAddressMode,
+    // State monitor for sleeping TODO: refactor to a Model-connected state machine
+    sleeping: bool,
+}
+
+impl<DI, M, RST> AsyncDisplay<DI, M, RST>
+where
+    DI: AsyncWriteOnlyDataCommand,
+    M: AsyncModel,
+    RST: OutputPin,
+{
+    ///
+    /// Returns currently set [Orientation]
+    ///
+    pub fn orientation(&self) -> Orientation {
+        self.options.orientation()
+    }
+
+    ///
+    /// Sets display [Orientation] with mirror image parameter
+    ///
+    /// # Example
+    /// ```rust ignore
+    /// display.orientation(Orientation::Portrait(false)).unwrap();
+    /// ```
+    pub async fn set_orientation(&mut self, orientation: Orientation) -> Result<(), Error> {
+        self.madctl = self.madctl.with_orientation(orientation); // set orientation
+        self.dcs.write_command(self.madctl).await?;
+
+        Ok(())
+    }
+
+    ///
+    /// Sets a pixel color at the given coords.
+    ///
+    /// # Arguments
+    ///
+    /// * `x` - x coordinate
+    /// * `y` - y coordinate
+    /// * `color` - the color value in pixel format of the display [Model]
+    ///
+    /// # Example
+    /// ```rust ignore
+    /// display.set_pixel(100, 200, Rgb666::new(251, 188, 20)).unwrap();
+    /// ```
+    pub fn set_pixel(&mut self, x: u16, y: u16, color: M::ColorFormat) -> Result<(), Error> {
+        /*self.set_address_window(x, y, x, y)?;
+        self.model
+            .write_pixels(&mut self.dcs, core::iter::once(color))?;
+
+        Ok(())*/
+        self.model.write_pixel(x, y, color)?;
+        
+        Ok(())
+    }
+
+    ///
+    /// Sets pixel colors in a rectangular region.
+    ///
+    /// The color values from the `colors` iterator will be drawn to the given region starting
+    /// at the top left corner and continuing, row first, to the bottom right corner. No bounds
+    /// checking is performed on the `colors` iterator and drawing will wrap around if the
+    /// iterator returns more color values than the number of pixels in the given region.
+    ///
+    /// This is a low level function, which isn't intended to be used in regular user code.
+    /// Consider using the [`fill_contiguous`](https://docs.rs/embedded-graphics/latest/embedded_graphics/draw_target/trait.DrawTarget.html#method.fill_contiguous)
+    /// function from the `embedded-graphics` crate as an alternative instead.
+    ///
+    /// # Arguments
+    ///
+    /// * `sx` - x coordinate start
+    /// * `sy` - y coordinate start
+    /// * `ex` - x coordinate end
+    /// * `ey` - y coordinate end
+    /// * `colors` - anything that can provide `IntoIterator<Item = u16>` to iterate over pixel data
+    pub fn set_pixels<T>(
+        &mut self,
+        sx: u16,
+        sy: u16,
+        ex: u16,
+        ey: u16,
+        colors: T,
+    ) -> Result<(), Error>
+    where
+        T: IntoIterator<Item = M::ColorFormat>,
+    {
+        /*self.set_address_window(sx, sy, ex, ey)?;
+        self.model.write_pixels(&mut self.dcs, colors)?;*/
+        
+        let mut x = sx;
+        let mut y = sy;
+        for color in colors {
+
+            
+            self.set_pixel(x, y, color)?;
+            
+            if x == ex {
+                if y == ey {
+                    // this was the last line, finish
+                    break;
+                }
+                // end of line, go to next line
+                y += 1;
+                x = 0;
+            } else {
+                // go to next pixel in current line
+                x += 1;
+            }
+        }
+
+        Ok(())
+    }
+
+    ///
+    /// Sets scroll region
+    /// # Arguments
+    ///
+    /// * `tfa` - Top fixed area
+    /// * `vsa` - Vertical scrolling area
+    /// * `bfa` - Bottom fixed area
+    ///
+    pub async fn set_scroll_region(&mut self, tfa: u16, vsa: u16, bfa: u16) -> Result<(), Error> {
+        let vscrdef = dcs::SetScrollArea::new(tfa, vsa, bfa);
+        self.dcs.write_command(vscrdef).await
+    }
+
+    ///
+    /// Sets scroll offset "shifting" the displayed picture
+    /// # Arguments
+    ///
+    /// * `offset` - scroll offset in pixels
+    ///
+    pub async fn set_scroll_offset(&mut self, offset: u16) -> Result<(), Error> {
+        let vscad = dcs::SetScrollStart::new(offset);
+        self.dcs.write_command(vscad).await
+    }
+
+    ///
+    /// Release resources allocated to this driver back.
+    /// This returns the display interface, reset pin and and the model deconstructing the driver.
+    ///
+    pub fn release(self) -> (DI, M, Option<RST>) {
+        (self.dcs.release(), self.model, self.rst)
+    }
+
+    // Sets the address window for the display.
+    async fn set_address_window(&mut self, sx: u16, sy: u16, ex: u16, ey: u16) -> Result<(), Error> {
+        // add clipping offsets if present
+        let offset = self.options.window_offset();
+        let (sx, sy, ex, ey) = (sx + offset.0, sy + offset.1, ex + offset.0, ey + offset.1);
+
+        self.dcs.write_command(dcs::SetColumnAddress::new(sx, ex)).await?;
+        self.dcs.write_command(dcs::SetPageAddress::new(sy, ey)).await
+    }
+
+    ///
+    /// Configures the tearing effect output.
+    ///
+    pub async fn set_tearing_effect(&mut self, tearing_effect: TearingEffect) -> Result<(), Error> {
+        self.dcs
+            .write_command(dcs::SetTearingEffect(tearing_effect)).await
+    }
+
+    ///
+    /// Returns `true` if display is currently set to sleep.
+    ///
+    pub fn is_sleeping<D: DelayUs<u32>>(&self) -> bool {
+        self.sleeping
+    }
+
+    ///
+    /// Puts the display to sleep, reducing power consumption.
+    /// Need to call [Self::wake] before issuing other commands
+    ///
+    pub async fn sleep<D: DelayUs<u32>>(&mut self, delay: &mut D) -> Result<(), Error> {
+        self.dcs.write_command(dcs::EnterSleepMode).await?;
+        // All supported models requires a 120ms delay before issuing other commands
+        delay.delay_us(120_000);
+        self.sleeping = true;
+        Ok(())
+    }
+
+    ///
+    /// Wakes the display after it's been set to sleep via [Self::sleep]
+    ///
+    pub async fn wake<D: DelayUs<u32>>(&mut self, delay: &mut D) -> Result<(), Error> {
+        self.dcs.write_command(dcs::ExitSleepMode).await?;
+        // ST7789 and st7735s have the highest minimal delay of 120ms
+        delay.delay_us(120_000);
+        self.sleeping = false;
+        Ok(())
+    }
+    
+    /// todo: Documentation
+    pub async fn flush(&mut self) -> Result<(), Error> {
+        self.set_address_window(0, 0, 239, 134).await?;
+        self.model.flush(&mut self.dcs).await
+    }
+
+    /// Returns the DCS interface for sending raw commands.
+    ///
+    /// # Safety
+    ///
+    /// Sending raw commands to the controller can lead to undefined behaviour,
+    /// because the rest of the code isn't aware of any state changes that were caused by sending raw commands.
+    /// The user must ensure that the state of the controller isn't altered in a way that interferes with the normal
+    /// operation of this crate.
+    pub unsafe fn dcs(&mut self) -> &mut AsyncDcs<DI> {
         &mut self.dcs
     }
 }

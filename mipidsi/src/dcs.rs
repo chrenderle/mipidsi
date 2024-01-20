@@ -1,6 +1,6 @@
 //! MIPI DCS commands.
 
-use display_interface::{DataFormat, WriteOnlyDataCommand};
+use display_interface::{DataFormat, WriteOnlyDataCommand, AsyncWriteOnlyDataCommand};
 
 use crate::Error;
 
@@ -49,6 +49,11 @@ pub struct Dcs<DI> {
     pub di: DI,
 }
 
+pub struct AsyncDcs<DI> {
+    /// Display interface instance.
+    pub di: DI,
+}
+
 impl<DI> Dcs<DI>
 where
     DI: WriteOnlyDataCommand,
@@ -84,6 +89,46 @@ where
 
         if !param_bytes.is_empty() {
             self.di.send_data(DataFormat::U8(param_bytes))?; // TODO: empty guard?
+        }
+        Ok(())
+    }
+}
+
+impl<DI> AsyncDcs<DI>
+where
+    DI: AsyncWriteOnlyDataCommand,
+{
+    /// Creates a new [Dcs] instance from a display interface.
+    pub fn write_only(di: DI) -> Self {
+        Self { di }
+    }
+
+    /// Releases the display interface.
+    pub fn release(self) -> DI {
+        self.di
+    }
+
+    /// Sends a DCS command to the display interface.
+    pub async fn write_command(&mut self, command: impl DcsCommand) -> Result<(), Error> {
+        let mut param_bytes: [u8; 16] = [0; 16];
+        let n = command.fill_params_buf(&mut param_bytes)?;
+        self.write_raw(command.instruction(), &param_bytes[..n]).await
+    }
+
+    /// Sends a raw command with the given `instruction` to the display interface.
+    ///
+    /// The `param_bytes` slice can contain the instruction parameters, which are sent as data after
+    /// the instruction code was sent. If no parameters are required an empty slice can be passed to
+    /// this method.
+    ///
+    /// This method is intended to be used for sending commands which are not part of the MIPI DCS
+    /// user command set. Use [`write_command`](Self::write_command) for commands in the user
+    /// command set.
+    pub async fn write_raw(&mut self, instruction: u8, param_bytes: &[u8]) -> Result<(), Error> {
+        self.di.send_commands(DataFormat::U8(&[instruction])).await?;
+
+        if !param_bytes.is_empty() {
+            self.di.send_data(DataFormat::U8(param_bytes)).await?; // TODO: empty guard?
         }
         Ok(())
     }

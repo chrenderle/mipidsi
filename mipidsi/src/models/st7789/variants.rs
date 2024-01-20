@@ -1,8 +1,9 @@
-use display_interface::WriteOnlyDataCommand;
+use display_interface::{WriteOnlyDataCommand, AsyncWriteOnlyDataCommand};
+use embedded_graphics_core::pixelcolor::Rgb565;
 
-use crate::{Builder, ColorInversion, ModelOptions, Orientation};
+use crate::{Builder, ColorInversion, ModelOptions, Orientation, builder::AsyncBuilder};
 
-use super::ST7789;
+use super::{ST7789, ST7789Framebuffer};
 
 impl<DI> Builder<DI, ST7789>
 where
@@ -35,6 +36,15 @@ where
 
         // pico v1 is cropped to 135x240 size with an offset of (40, 53)
         Self::new(di, ST7789, options)
+    }
+}
+
+impl<'framebuffer, DI> AsyncBuilder<DI, ST7789Framebuffer<'framebuffer>>
+where
+    DI: AsyncWriteOnlyDataCommand,
+{
+    pub fn st7789_framebuffer(di: DI, framebuffer: &'framebuffer mut [u16; 240 * 135]) -> Self {
+        Self::with_model(di, ST7789Framebuffer { framebuffer })
     }
 }
 
