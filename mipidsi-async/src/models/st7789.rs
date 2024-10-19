@@ -1,18 +1,17 @@
-use display_interface::{DataFormat, WriteOnlyDataCommand, AsyncWriteOnlyDataCommand};
+use display_interface::{DataFormat, WriteOnlyDataCommand};
 use embedded_graphics_core::{pixelcolor::Rgb565, prelude::IntoStorage};
 use embedded_hal::{blocking::delay::DelayUs, digital::v2::OutputPin};
-use embedded_hal_async::delay::DelayNs as AsyncDelayNs;
 
 use crate::{
     dcs::{
         BitsPerPixel, Dcs, EnterNormalMode, ExitSleepMode, PixelFormat, SetAddressMode,
-        SetDisplayOn, SetInvertMode, SetPixelFormat, SetScrollArea, SoftReset, WriteMemoryStart, AsyncDcs,
+        SetDisplayOn, SetInvertMode, SetPixelFormat, SetScrollArea, SoftReset, WriteMemoryStart,
     },
     error::InitError,
     ColorInversion, Error, ModelOptions,
 };
 
-use super::{Model, AsyncModel};
+use super::Model;
 
 /// Module containing all ST7789 variants.
 mod variants;
@@ -21,12 +20,7 @@ mod variants;
 ///
 /// Interfaces implemented by the [display-interface](https://crates.io/crates/display-interface) are supported.
 pub struct ST7789;
-/// ST7789 display in Rgb565 color mode.
-/// With framebuffer on the MCU. Data only get's sent to the display with a call to [crate::AsyncDisplay::flush].
-/// Interfaces implemented by the [display-interface](https://crates.io/crates/display-interface) are supported.
-pub struct ST7789Framebuffer<'framebuffer> {
-    framebuffer: &'framebuffer mut [u16; 240 * 135],
-}
+pub struct ST7789Framebuf;
 
 impl Model for ST7789 {
     type ColorFormat = Rgb565;
@@ -95,65 +89,62 @@ impl Model for ST7789 {
     }
 }
 
-impl<'framebuffer> AsyncModel for ST7789Framebuffer<'framebuffer> {
+impl AsyncModel for ST7789Framebuf {
     type ColorFormat = Rgb565;
-
-    async fn init<RST, DELAY, DI>(
+    
+    fn init<RST, DELAY, DI>(
         &mut self,
-        dcs: &mut AsyncDcs<DI>,
+        dcs: &mut Dcs<DI>,
         delay: &mut DELAY,
         options: &ModelOptions,
         rst: &mut Option<RST>,
     ) -> Result<SetAddressMode, InitError<RST::Error>>
     where
         RST: OutputPin,
-        DELAY: AsyncDelayNs,
+        DELAY: DelayUs<u32>,
         DI: AsyncWriteOnlyDataCommand,
     {
         let madctl = SetAddressMode::from(options);
 
         match rst {
-            Some(ref mut rst) => self.hard_reset(rst, delay).await?,
-            None => dcs.write_command(SoftReset).await?,
+            Some(ref mut rst) => self.hard_reset(rst, delay)?,
+            None => dcs.write_command(SoftReset)?,
         }
-        delay.delay_us(150_000).await;
+        delay.delay_us(150_000);
 
-        dcs.write_command(ExitSleepMode).await?;
-        delay.delay_us(10_000).await;
+        dcs.write_command(ExitSleepMode)?;
+        delay.delay_us(10_000);
 
         // set hw scroll area based on framebuffer size
-        dcs.write_command(SetScrollArea::from(options)).await?;
-        dcs.write_command(madctl).await?;
+        dcs.write_command(SetScrollArea::from(options))?;
+        dcs.write_command(madctl)?;
 
-        dcs.write_command(SetInvertMode(options.invert_colors)).await?;
+        dcs.write_command(SetInvertMode(options.invert_colors))?;
 
         let pf = PixelFormat::with_all(BitsPerPixel::from_rgb_color::<Self::ColorFormat>());
-        dcs.write_command(SetPixelFormat::new(pf)).await?;
-        delay.delay_us(10_000).await;
-        dcs.write_command(EnterNormalMode).await?;
-        delay.delay_us(10_000).await;
-        dcs.write_command(SetDisplayOn).await?;
+        dcs.write_command(SetPixelFormat::new(pf))?;
+        delay.delay_us(10_000);
+        dcs.write_command(EnterNormalMode)?;
+        delay.delay_us(10_000);
+        dcs.write_command(SetDisplayOn)?;
 
         // DISPON requires some time otherwise we risk SPI data issues
-        delay.delay_us(120_000).await;
+        delay.delay_us(120_000);
 
         Ok(madctl)
     }
-    
-    fn clear(&mut self, color: Self::ColorFormat) -> Result<(), Error> {
-        *self.framebuffer = [color.into_storage(); 240 * 135];
-        
-        Ok(())
-    }
 
-    fn write_pixel(&mut self, x: u16, y: u16, colors: Self::ColorFormat) -> Result<(), Error> {
-        let Some(framebuffer) = self.framebuffer.get_mut((x + y * 240) as usize) else {
-            defmt::info!("wrong pixel: x = {}; y = {}", x, y);
-            panic!();
-        };
-        *framebuffer = colors.into_storage();
-        //*self.framebuffer.get_mut((x + y * 135) as usize).expect("wrong index") = colors.into_storage();
-        
+    fn write_pixels<DI, I>(&mut self, dcs: &mut Dcs<DI>, colors: I) -> Result<(), Error>
+    where
+        DI: WriteOnlyDataCommand,
+        I: IntoIterator<Item = Self::ColorFormat>,
+    {
+        dcs.write_command(WriteMemoryStart)?;
+
+        let mut iter = colors.into_iter().map(Rgb565::into_storage);
+
+        let buf = DataFormat::U16BEIter(&mut iter);
+        dcs.di.send_data(buf)?;
         Ok(())
     }
 
@@ -163,16 +154,4 @@ impl<'framebuffer> AsyncModel for ST7789Framebuffer<'framebuffer> {
 
         options
     }
-    
-    async fn flush<DI>(&mut self, dcs: &mut AsyncDcs<DI>) -> Result<(), Error> 
-    where
-        DI: AsyncWriteOnlyDataCommand
-    {
-        dcs.write_command(WriteMemoryStart).await?;
-        
-        dcs.di.send_data(DataFormat::U16BE(self.framebuffer)).await?;
-        
-        Ok(())
-    }
-    
 }

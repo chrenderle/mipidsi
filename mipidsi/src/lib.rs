@@ -76,6 +76,8 @@
 //! ## Troubleshooting
 //! See [document](https://github.com/almindor/mipidsi/blob/master/docs/TROUBLESHOOTING.md)
 
+use core::fmt::Debug;
+
 use dcs::{Dcs, AsyncDcs};
 use display_interface::{WriteOnlyDataCommand, AsyncWriteOnlyDataCommand};
 
@@ -532,5 +534,16 @@ where
     /// operation of this crate.
     pub unsafe fn dcs(&mut self) -> &mut AsyncDcs<DI> {
         &mut self.dcs
+    }
+}
+
+impl<DI, MODEL, RST> Debug for AsyncDisplay<DI, MODEL, RST> 
+where
+    DI: AsyncWriteOnlyDataCommand,
+    MODEL: AsyncModel,
+    RST: OutputPin,
+{
+    fn fmt(&self, _f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        Ok(())
     }
 }
